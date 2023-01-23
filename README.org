@@ -1,0 +1,12 @@
+#+author: Jan Roßbach
+#+title: rpass
+
+* rpass
+
+This is a fairly simple linux pass clone written in rust.
+
+* Dependencies
+
+- gpg
+- gpgme
+- libgpg-error
