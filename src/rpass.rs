@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::io::{self, Read};
 use std::fs::{File, self};
 use std::path::PathBuf;
+use std::process::Command;
 
 use gpgme::{Key, Context, Protocol, KeyListMode};
 
@@ -10,7 +11,8 @@ const GPG_ID_FILE_NAME: &str = "/.gpg-id";
 pub struct RpassManager {
     store_dir: PathBuf,
     key: Key,
-    context: Context
+    context: Context,
+    git_enabled: bool
 }
 
 impl RpassManager {
@@ -19,10 +21,12 @@ impl RpassManager {
         let gpg_id = read_gpg_id(&store_dir)?;
         let key = get_user_key(&gpg_id)?.unwrap();
         let context = Context::from_protocol(Protocol::OpenPgp)?;
+        let git_enabled = is_git_dir(&store_dir);
         Ok(RpassManager {
             store_dir,
             key,
-            context
+            context,
+            git_enabled
         })
     }
 
@@ -96,4 +100,13 @@ pub fn get_user_key(username: &str) -> std::io::Result<Option<Key>> {
         }
     }
     Ok(None)
+}
+
+fn is_git_dir(dir: &PathBuf) -> bool {
+    let dir_arg = format!("--git-dir={}/.git",dir.to_str().unwrap());
+    let exit_status = Command::new("git")
+        .arg(dir_arg)
+        .arg("status")
+        .output().unwrap().status.success();
+    exit_status
 }

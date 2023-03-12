@@ -1,4 +1,5 @@
 use clap::{Args, Parser, Subcommand};
+use fork::{Fork, daemon};
 use gpgme::Key;
 use passwords::PasswordGenerator;
 use regex::RegexSet;
@@ -13,7 +14,6 @@ use std::path::PathBuf;
 mod rpass;
 
 const RPASS_DEFAULT_STORE_NAME: &str = ".rpassword_store";
-
 
 #[derive(Debug, Parser)]
 #[clap(author, version, about)]
@@ -342,9 +342,11 @@ fn show(manager: &mut RpassManager, pass_name: String, clip: bool) -> io::Result
     if clip {
         into_clipboard(password)?;
         println!("Copied {} to clipboard. Will clear in 45 seconds.", pass_name);
-        sleep(Duration::from_millis(45000));
-        into_clipboard("".to_string())?;
-        println!("Clipboard cleared.");
+        if let Ok(Fork::Child) = daemon(false,false) {
+            sleep(Duration::from_millis(45000));
+            into_clipboard("".to_string())?;
+            println!("Clipboard cleared.");
+        }
     } else {
         println!("{}", password);
     }
@@ -415,9 +417,11 @@ fn generate(manager: &mut RpassManager, command: GenerateCommand) -> io::Result<
     if command.clip {
         into_clipboard(password.clone())?;
         println!("Copied {} to clipboard. Will clear in 45 seconds.", pass_name);
-        sleep(Duration::from_millis(45000));
-        into_clipboard("".to_string())?;
-        println!("Clipboard cleared.");
+        if let Ok(Fork::Child) = daemon(false,false) {
+            sleep(Duration::from_millis(45000));
+            into_clipboard("".to_string())?;
+            println!("Clipboard cleared.");
+        }
     } else {
         println!("{}", password);
     }
