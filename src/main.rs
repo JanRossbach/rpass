@@ -1,11 +1,19 @@
 use clap::{Args, Parser, Subcommand};
-use fork::{Fork, daemon};
+use fork::{daemon, Fork};
 use gpgme::Key;
 use passwords::PasswordGenerator;
 use regex::RegexSet;
 use rpass::RpassManager;
 
-use std::{str::FromStr, env, process::{Command, Stdio}, io::{self, Read, Write}, fs::{File, create_dir_all}, thread::sleep, time::Duration};
+use std::{
+    env,
+    fs::{create_dir_all, File},
+    io::{self, Read, Write},
+    process::{Command, Stdio},
+    str::FromStr,
+    thread::sleep,
+    time::Duration,
+};
 
 use home::home_dir;
 
@@ -75,7 +83,7 @@ struct InitCommand {
 
 #[derive(Args, Debug)]
 struct GitCommand {
-    git_command_args: Vec<String>
+    git_command_args: Vec<String>,
 }
 
 #[derive(Args, Debug)]
@@ -125,11 +133,11 @@ struct FindCommand {
     pass_names: Vec<String>,
 }
 
-#[derive(Args,Debug)]
+#[derive(Args, Debug)]
 struct ShowCommand {
     pass_name: String,
     #[arg(short, long)]
-    clip: bool
+    clip: bool,
 }
 
 fn main() {
@@ -141,25 +149,30 @@ fn main() {
 
     let rpassword_store_dir = build_password_dir(subfolder);
 
-
     // When calling init for the first time, we short circuit here before createing the pw-manager.
     if !rpassword_store_dir.exists() {
         match args.command {
             RpassCommand::Init(command) => {
                 let result = init_new(&command.gpg_id, &rpassword_store_dir);
                 match result {
-                    Ok(()) => println!("Password Store successfully created at {:?}", rpassword_store_dir),
+                    Ok(()) => println!(
+                        "Password Store successfully created at {:?}",
+                        rpassword_store_dir
+                    ),
                     Err(err) => println!("Password Store create failed because: {}", err),
                 };
                 return;
             }
-            _ => ()
+            _ => (),
         }
     }
 
     let mut manager = match rpass::RpassManager::new(rpassword_store_dir.clone()) {
         Ok(m) => m,
-        Err(err) => { eprintln!("Password Manager could not be loaded because: {}",err); return; }
+        Err(err) => {
+            eprintln!("Password Manager could not be loaded because: {}", err);
+            return;
+        }
     };
 
     // Sub Command dispatch.
@@ -196,7 +209,6 @@ fn git_run(store_dir: &PathBuf, git_command_args: Vec<String>) -> io::Result<()>
 }
 
 fn move_password(manager: &mut RpassManager, command: MoveCommand) -> io::Result<()> {
-
     let src_file = manager.pass_to_file(command.old_name.clone());
     let target_file = manager.pass_to_file(command.new_name.clone());
 
@@ -208,10 +220,13 @@ fn move_password(manager: &mut RpassManager, command: MoveCommand) -> io::Result
         .expect("Failed to mv the File.");
 
     let result = std::str::from_utf8(&output.stdout);
-    println!("{}",result.unwrap().trim());
+    println!("{}", result.unwrap().trim());
 
     if manager.git_enabled {
-        git_commit_with_msg(&manager.store_dir, format!("Renamed {} to {}",command.old_name, command.new_name).to_string())?;
+        git_commit_with_msg(
+            &manager.store_dir,
+            format!("Renamed {} to {}", command.old_name, command.new_name).to_string(),
+        )?;
     }
 
     Ok(())
@@ -229,23 +244,29 @@ fn copy_password(manager: &mut RpassManager, command: CopyCommand) -> io::Result
         .expect("Failed to edit file in vim.");
 
     if manager.git_enabled {
-        git_commit_with_msg(&manager.store_dir, format!("Copied {} to {}",command.old_name, command.new_name).to_string())?;
+        git_commit_with_msg(
+            &manager.store_dir,
+            format!("Copied {} to {}", command.old_name, command.new_name).to_string(),
+        )?;
     }
 
     let result = std::str::from_utf8(&output.stdout);
-    println!("{}",result.unwrap().trim());
+    println!("{}", result.unwrap().trim());
     Ok(())
 }
 
-fn remove_password(manager: &mut RpassManager,command: RemoveCommand) -> io::Result<()> {
+fn remove_password(manager: &mut RpassManager, command: RemoveCommand) -> io::Result<()> {
     let file = manager.pass_to_file(command.pass_name.clone());
 
-    let prompt = format!("Are you sure you would like to delete {}?", command.pass_name);
+    let prompt = format!(
+        "Are you sure you would like to delete {}?",
+        command.pass_name
+    );
 
     // TODO subfolders
 
     if !manager.pass_exists(command.pass_name.clone()) {
-        eprintln!("Password {} does not exist.",command.pass_name);
+        eprintln!("Password {} does not exist.", command.pass_name);
         return Ok(());
     }
 
@@ -273,10 +294,13 @@ fn remove_password(manager: &mut RpassManager,command: RemoveCommand) -> io::Res
     let output = output.output().expect("Failed to remove Password File.");
 
     let result = std::str::from_utf8(&output.stdout);
-    println!("{}",result.unwrap().trim());
+    println!("{}", result.unwrap().trim());
 
     if manager.git_enabled {
-        git_commit_with_msg(&manager.store_dir, format!("Removed {}",command.pass_name).to_string())?;
+        git_commit_with_msg(
+            &manager.store_dir,
+            format!("Removed {}", command.pass_name).to_string(),
+        )?;
     }
 
     Ok(())
@@ -298,8 +322,14 @@ mod tests {
 
     #[test]
     fn test_build_password_dir() {
-        assert_eq!(build_password_dir("".to_string()).to_str().unwrap(), "/home/jan/repositories/rpass/store/");
-        assert_eq!(build_password_dir("jan".to_string()).to_str().unwrap(), "/home/jan/repositories/rpass/store/jan");
+        assert_eq!(
+            build_password_dir("".to_string()).to_str().unwrap(),
+            "/home/jan/repositories/rpass/store/"
+        );
+        assert_eq!(
+            build_password_dir("jan".to_string()).to_str().unwrap(),
+            "/home/jan/repositories/rpass/store/jan"
+        );
     }
 }
 
@@ -331,12 +361,12 @@ fn init_new(gpg_id: &str, store_dir: &PathBuf) -> io::Result<()> {
     Ok(())
 }
 
-fn init_reencrypt(_manager: &RpassManager,_gpg_id: &str) -> io::Result<()> {
+fn init_reencrypt(_manager: &RpassManager, _gpg_id: &str) -> io::Result<()> {
     // TODO
     todo!();
 }
 
-fn insert(manager: &mut RpassManager, pass_name:String, force: bool) -> io::Result<()> {
+fn insert(manager: &mut RpassManager, pass_name: String, force: bool) -> io::Result<()> {
     if manager.pass_exists(pass_name.clone()) && !force {
         if prompt_user("Password already exists. Override?") {
             println!("Overriding.");
@@ -350,36 +380,42 @@ fn insert(manager: &mut RpassManager, pass_name:String, force: bool) -> io::Resu
     manager.save_password(pass_name.clone(), password)?;
 
     if manager.git_enabled {
-        git_commit_with_msg(&manager.store_dir, format!("Added {}",pass_name).to_string())?;
+        git_commit_with_msg(
+            &manager.store_dir,
+            format!("Added {}", pass_name).to_string(),
+        )?;
     }
 
     Ok(())
 }
 
 fn find(manager: &RpassManager, search_terms: Vec<String>) -> io::Result<()> {
-    let regexes: Vec<_> = search_terms.iter()
+    let regexes: Vec<_> = search_terms
+        .iter()
         .map(|pass_name| format!(r".*{}.*", pass_name))
         .collect();
     let regex_set = RegexSet::new(regexes).unwrap();
     let password_names = manager.get_password_names()?;
 
-    println!("Search Terms: {}",search_terms.join(","));
+    println!("Search Terms: {}", search_terms.join(","));
     for pw in password_names {
         if regex_set.matches(&pw).into_iter().count() > 0 {
-            println!("|-- {}",pw);
+            println!("|-- {}", pw);
         }
     }
     Ok(())
 }
 
 fn show(manager: &mut RpassManager, pass_name: String, clip: bool) -> io::Result<()> {
-
     let password = manager.get_password(pass_name.clone())?;
 
     if clip {
         into_clipboard(password)?;
-        println!("Copied {} to clipboard. Will clear in 45 seconds.", pass_name);
-        if let Ok(Fork::Child) = daemon(false,false) {
+        println!(
+            "Copied {} to clipboard. Will clear in 45 seconds.",
+            pass_name
+        );
+        if let Ok(Fork::Child) = daemon(false, false) {
             sleep(Duration::from_millis(45000));
             into_clipboard("".to_string())?;
             println!("Clipboard cleared.");
@@ -406,18 +442,14 @@ fn into_clipboard(output: String) -> io::Result<()> {
 }
 
 fn git_commit_with_msg(dir: &PathBuf, msg: String) -> io::Result<()> {
-    git_run(dir, vec!["add".to_string(),"*".to_string()])?;
-    git_run(dir, vec!["commit".to_string(),
-                                         "-m".to_string(),
-                                         msg])?;
+    git_run(dir, vec!["add".to_string(), "*".to_string()])?;
+    git_run(dir, vec!["commit".to_string(), "-m".to_string(), msg])?;
     Ok(())
 }
 
 fn edit(manager: &mut RpassManager, pass_name: String) -> io::Result<()> {
-
     if manager.pass_exists(pass_name.clone()) {
-
-        let tmp_file: String = format!("/tmp/{}pwtempfile",pass_name);
+        let tmp_file: String = format!("/tmp/{}pwtempfile", pass_name);
         Command::new("vim")
             .arg(tmp_file.clone())
             .status()
@@ -428,14 +460,20 @@ fn edit(manager: &mut RpassManager, pass_name: String) -> io::Result<()> {
 
         manager.save_password(pass_name.clone(), new_password)?;
 
-        git_commit_with_msg(&manager.store_dir, format!("Edited {}",pass_name).to_string())?;
+        git_commit_with_msg(
+            &manager.store_dir,
+            format!("Edited {}", pass_name).to_string(),
+        )?;
         return Ok(());
     }
 
     let password = get_pass_from_user()?;
     manager.save_password(pass_name.clone(), password)?;
 
-    git_commit_with_msg(&manager.store_dir, format!("Added {}",pass_name).to_string())?;
+    git_commit_with_msg(
+        &manager.store_dir,
+        format!("Added {}", pass_name).to_string(),
+    )?;
     Ok(())
 }
 
@@ -466,8 +504,11 @@ fn generate(manager: &mut RpassManager, command: GenerateCommand) -> io::Result<
 
     if command.clip {
         into_clipboard(password.clone())?;
-        println!("Copied {} to clipboard. Will clear in 45 seconds.", pass_name);
-        if let Ok(Fork::Child) = daemon(false,false) {
+        println!(
+            "Copied {} to clipboard. Will clear in 45 seconds.",
+            pass_name
+        );
+        if let Ok(Fork::Child) = daemon(false, false) {
             sleep(Duration::from_millis(45000));
             into_clipboard("".to_string())?;
             println!("Clipboard cleared.");
@@ -491,7 +532,7 @@ fn prompt_user(message: &str) -> bool {
     std::io::stdin().read_exact(&mut answer).unwrap();
     let res = match answer[0] as char {
         'y' => true,
-        _ => false
+        _ => false,
     };
     // For some reason, after reading in with read_exact, rust just ignores the
     // next call to read_line. So here I just use one so it does not disrupt the

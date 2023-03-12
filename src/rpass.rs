@@ -1,10 +1,10 @@
 use std::collections::HashSet;
+use std::fs::{self, File};
 use std::io::{self, Read};
-use std::fs::{File, self};
 use std::path::PathBuf;
 use std::process::Command;
 
-use gpgme::{Key, Context, Protocol, KeyListMode};
+use gpgme::{Context, Key, KeyListMode, Protocol};
 
 const GPG_ID_FILE_NAME: &str = "/.gpg-id";
 
@@ -12,11 +12,10 @@ pub struct RpassManager {
     pub store_dir: PathBuf,
     key: Key,
     context: Context,
-    pub git_enabled: bool
+    pub git_enabled: bool,
 }
 
 impl RpassManager {
-
     pub fn new(store_dir: PathBuf) -> io::Result<Self> {
         let gpg_id = read_gpg_id(&store_dir)?;
         let key = get_user_key(&gpg_id)?.unwrap();
@@ -26,7 +25,7 @@ impl RpassManager {
             store_dir,
             key,
             context,
-            git_enabled
+            git_enabled,
         })
     }
 
@@ -41,7 +40,8 @@ impl RpassManager {
         let filename = self.pass_to_file(pass_name);
         let mut output = File::create(filename)?;
         self.context.set_armor(true);
-        self.context.encrypt(vec![&self.key], password, &mut output)?;
+        self.context
+            .encrypt(vec![&self.key], password, &mut output)?;
         Ok(())
     }
 
@@ -67,13 +67,14 @@ impl RpassManager {
         let filename = self.pass_to_file(pass_name);
         let mut input = File::open(&filename)?;
         let mut output = Vec::new();
-        self.context.decrypt(&mut input, &mut output)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{:?}",e)))?;
+        self.context.decrypt(&mut input, &mut output).map_err(|e| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{:?}", e))
+        })?;
         let result = std::str::from_utf8(&output).unwrap();
         Ok(result.trim().to_string())
     }
 
-    pub fn pass_to_file(self: &Self,pass_name: String) -> PathBuf {
+    pub fn pass_to_file(self: &Self, pass_name: String) -> PathBuf {
         self.store_dir.clone().join(pass_name + ".gpg")
     }
 }
@@ -107,6 +108,9 @@ fn is_git_dir(dir: &PathBuf) -> bool {
         .arg("-C")
         .arg(dir.to_str().unwrap())
         .arg("status")
-        .output().unwrap().status.success();
+        .output()
+        .unwrap()
+        .status
+        .success();
     exit_status
 }
