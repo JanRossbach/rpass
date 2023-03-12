@@ -49,6 +49,8 @@ enum RpassCommand {
     Cp(CopyCommand),
     /// Renames or moves old-path to new-path, optionally forcefully, selectively reencrypting.
     Mv(MoveCommand),
+    /// If the password store is a git repository, execute a git command specified by git-command-args.
+    Git(GitCommand),
 }
 
 #[derive(Args, Debug)]
@@ -69,6 +71,11 @@ struct InitCommand {
     subfolder: Option<String>,
 
     gpg_id: String,
+}
+
+#[derive(Args, Debug)]
+struct GitCommand {
+    git_command_args: Vec<String>
 }
 
 #[derive(Args, Debug)]
@@ -150,7 +157,7 @@ fn main() {
         }
     }
 
-    let mut manager = match rpass::RpassManager::new(rpassword_store_dir) {
+    let mut manager = match rpass::RpassManager::new(rpassword_store_dir.clone()) {
         Ok(m) => m,
         Err(err) => { eprintln!("Password Manager could not be loaded because: {}",err); return; }
     };
@@ -167,6 +174,7 @@ fn main() {
         RpassCommand::Mv(command) => move_password(&mut manager, command),
         RpassCommand::Cp(command) => copy_password(&mut manager, command),
         RpassCommand::Rm(command) => remove_password(&mut manager, command),
+        RpassCommand::Git(command) => git_run(&rpassword_store_dir, command.git_command_args),
     };
 
     // Error Handling
@@ -178,26 +186,40 @@ fn main() {
     }
 }
 
+fn git_run(store_dir: &PathBuf, git_command_args: Vec<String>) -> io::Result<()> {
+    let _output = Command::new("git")
+        .arg("-C")
+        .arg(store_dir.to_str().unwrap())
+        .args(git_command_args)
+        .spawn();
+    Ok(())
+}
+
 fn move_password(manager: &mut RpassManager, command: MoveCommand) -> io::Result<()> {
 
-    let src_file = manager.pass_to_file(command.old_name);
-    let target_file = manager.pass_to_file(command.new_name);
+    let src_file = manager.pass_to_file(command.old_name.clone());
+    let target_file = manager.pass_to_file(command.new_name.clone());
 
     let output = Command::new("mv")
         .arg(src_file)
         .arg(target_file)
         .arg("-v")
         .output()
-        .expect("Failed to edit file in vim.");
+        .expect("Failed to mv the File.");
 
     let result = std::str::from_utf8(&output.stdout);
     println!("{}",result.unwrap().trim());
+
+    if manager.git_enabled {
+        git_commit_with_msg(&manager.store_dir, format!("Renamed {} to {}",command.old_name, command.new_name).to_string())?;
+    }
+
     Ok(())
 }
 
 fn copy_password(manager: &mut RpassManager, command: CopyCommand) -> io::Result<()> {
-    let src_file = manager.pass_to_file(command.old_name);
-    let target_file = manager.pass_to_file(command.new_name);
+    let src_file = manager.pass_to_file(command.old_name.clone());
+    let target_file = manager.pass_to_file(command.new_name.clone());
 
     let output = Command::new("cp")
         .arg(src_file)
@@ -205,6 +227,10 @@ fn copy_password(manager: &mut RpassManager, command: CopyCommand) -> io::Result
         .arg("-v")
         .output()
         .expect("Failed to edit file in vim.");
+
+    if manager.git_enabled {
+        git_commit_with_msg(&manager.store_dir, format!("Copied {} to {}",command.old_name, command.new_name).to_string())?;
+    }
 
     let result = std::str::from_utf8(&output.stdout);
     println!("{}",result.unwrap().trim());
@@ -248,6 +274,11 @@ fn remove_password(manager: &mut RpassManager,command: RemoveCommand) -> io::Res
 
     let result = std::str::from_utf8(&output.stdout);
     println!("{}",result.unwrap().trim());
+
+    if manager.git_enabled {
+        git_commit_with_msg(&manager.store_dir, format!("Removed {}",command.pass_name).to_string())?;
+    }
+
     Ok(())
 }
 
@@ -316,7 +347,13 @@ fn insert(manager: &mut RpassManager, pass_name:String, force: bool) -> io::Resu
     }
 
     let password = get_pass_from_user()?;
-    manager.save_password(pass_name, password)
+    manager.save_password(pass_name.clone(), password)?;
+
+    if manager.git_enabled {
+        git_commit_with_msg(&manager.store_dir, format!("Added {}",pass_name).to_string())?;
+    }
+
+    Ok(())
 }
 
 fn find(manager: &RpassManager, search_terms: Vec<String>) -> io::Result<()> {
@@ -368,6 +405,14 @@ fn into_clipboard(output: String) -> io::Result<()> {
     Ok(())
 }
 
+fn git_commit_with_msg(dir: &PathBuf, msg: String) -> io::Result<()> {
+    git_run(dir, vec!["add".to_string(),"*".to_string()])?;
+    git_run(dir, vec!["commit".to_string(),
+                                         "-m".to_string(),
+                                         msg])?;
+    Ok(())
+}
+
 fn edit(manager: &mut RpassManager, pass_name: String) -> io::Result<()> {
 
     if manager.pass_exists(pass_name.clone()) {
@@ -381,12 +426,17 @@ fn edit(manager: &mut RpassManager, pass_name: String) -> io::Result<()> {
         let mut new_password = String::new();
         file.read_to_string(&mut new_password)?;
 
-        manager.save_password(pass_name, new_password)?;
+        manager.save_password(pass_name.clone(), new_password)?;
+
+        git_commit_with_msg(&manager.store_dir, format!("Edited {}",pass_name).to_string())?;
         return Ok(());
     }
 
     let password = get_pass_from_user()?;
-    manager.save_password(pass_name, password)
+    manager.save_password(pass_name.clone(), password)?;
+
+    git_commit_with_msg(&manager.store_dir, format!("Added {}",pass_name).to_string())?;
+    Ok(())
 }
 
 fn generate(manager: &mut RpassManager, command: GenerateCommand) -> io::Result<()> {

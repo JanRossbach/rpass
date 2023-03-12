@@ -9,10 +9,10 @@ use gpgme::{Key, Context, Protocol, KeyListMode};
 const GPG_ID_FILE_NAME: &str = "/.gpg-id";
 
 pub struct RpassManager {
-    store_dir: PathBuf,
+    pub store_dir: PathBuf,
     key: Key,
     context: Context,
-    git_enabled: bool
+    pub git_enabled: bool
 }
 
 impl RpassManager {
@@ -103,9 +103,9 @@ pub fn get_user_key(username: &str) -> std::io::Result<Option<Key>> {
 }
 
 fn is_git_dir(dir: &PathBuf) -> bool {
-    let dir_arg = format!("--git-dir={}/.git",dir.to_str().unwrap());
     let exit_status = Command::new("git")
-        .arg(dir_arg)
+        .arg("-C")
+        .arg(dir.to_str().unwrap())
         .arg("status")
         .output().unwrap().status.success();
     exit_status
