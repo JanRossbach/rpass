@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::{self, Read};
-use std::path::PathBuf;
+use std::path::{PathBuf, Path};
 use std::process::Command;
 
 use gpgme::{Context, Key, KeyListMode, Protocol};
@@ -29,14 +29,14 @@ impl RpassManager {
         })
     }
 
-    pub fn pass_exists(self: &Self, pass_name: String) -> bool {
+    pub fn pass_exists(&self, pass_name: String) -> bool {
         let file = self.pass_to_file(pass_name);
         file.exists()
     }
 
     /// Takes a clearstring password, encrypts it and saves it to the filesystem.
     /// The filepath will be store_dir/pass_name.gpg
-    pub fn save_password(self: &mut Self, pass_name: String, password: String) -> io::Result<()> {
+    pub fn save_password(&mut self, pass_name: String, password: String) -> io::Result<()> {
         let filename = self.pass_to_file(pass_name);
         let mut output = File::create(filename)?;
         self.context.set_armor(true);
@@ -46,7 +46,7 @@ impl RpassManager {
     }
 
     /// Fetches all the password names in the store. Meaning files with the .gpg extension.
-    pub fn get_password_names(self: &Self) -> io::Result<HashSet<String>> {
+    pub fn get_password_names(&self) -> io::Result<HashSet<String>> {
         let mut passwords: HashSet<String> = HashSet::new();
         for dir_entry in fs::read_dir(&self.store_dir)? {
             let dir_entry = dir_entry?;
@@ -63,9 +63,9 @@ impl RpassManager {
     }
 
     /// Returns the decrypted cleartext password with the given name as a Result.
-    pub fn get_password(self: &mut Self, pass_name: String) -> io::Result<String> {
+    pub fn get_password(&mut self, pass_name: String) -> io::Result<String> {
         let filename = self.pass_to_file(pass_name);
-        let mut input = File::open(&filename)?;
+        let mut input = File::open(filename)?;
         let mut output = Vec::new();
         self.context.decrypt(&mut input, &mut output).map_err(|e| {
             std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{:?}", e))
@@ -74,17 +74,17 @@ impl RpassManager {
         Ok(result.trim().to_string())
     }
 
-    pub fn pass_to_file(self: &Self, pass_name: String) -> PathBuf {
+    pub fn pass_to_file(&self, pass_name: String) -> PathBuf {
         self.store_dir.clone().join(pass_name + ".gpg")
     }
 }
 
-fn read_gpg_id(store_dir: &PathBuf) -> std::io::Result<String> {
+fn read_gpg_id(store_dir: &Path) -> std::io::Result<String> {
     let gpg_id_filename = store_dir.to_str().unwrap().to_string() + GPG_ID_FILE_NAME;
     let mut gpg_id_file = fs::File::open(gpg_id_filename)?;
     let mut gpg_id = String::new();
     gpg_id_file.read_to_string(&mut gpg_id)?;
-    return Ok(gpg_id);
+    Ok(gpg_id)
 }
 
 pub fn get_user_key(username: &str) -> std::io::Result<Option<Key>> {
@@ -103,7 +103,7 @@ pub fn get_user_key(username: &str) -> std::io::Result<Option<Key>> {
     Ok(None)
 }
 
-fn is_git_dir(dir: &PathBuf) -> bool {
+fn is_git_dir(dir: &Path) -> bool {
     let exit_status = Command::new("git")
         .arg("-C")
         .arg(dir.to_str().unwrap())

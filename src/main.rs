@@ -12,7 +12,7 @@ use std::{
     process::{Command, Stdio},
     str::FromStr,
     thread::sleep,
-    time::Duration,
+    time::Duration, path::Path,
 };
 
 use home::home_dir;
@@ -151,19 +151,16 @@ fn main() {
 
     // When calling init for the first time, we short circuit here before createing the pw-manager.
     if !rpassword_store_dir.exists() {
-        match args.command {
-            RpassCommand::Init(command) => {
-                let result = init_new(&command.gpg_id, &rpassword_store_dir);
-                match result {
-                    Ok(()) => println!(
-                        "Password Store successfully created at {:?}",
-                        rpassword_store_dir
-                    ),
-                    Err(err) => println!("Password Store create failed because: {}", err),
-                };
-                return;
-            }
-            _ => (),
+        if let RpassCommand::Init(command) = args.command {
+            let result = init_new(&command.gpg_id, &rpassword_store_dir);
+            match result {
+                Ok(()) => println!(
+                    "Password Store successfully created at {:?}",
+                    rpassword_store_dir
+                ),
+                Err(err) => println!("Password Store create failed because: {}", err),
+            };
+            return;
         }
     }
 
@@ -199,7 +196,7 @@ fn main() {
     }
 }
 
-fn git_run(store_dir: &PathBuf, git_command_args: Vec<String>) -> io::Result<()> {
+fn git_run(store_dir: &Path, git_command_args: Vec<String>) -> io::Result<()> {
     let _output = Command::new("git")
         .arg("-C")
         .arg(store_dir.to_str().unwrap())
@@ -225,7 +222,7 @@ fn move_password(manager: &mut RpassManager, command: MoveCommand) -> io::Result
     if manager.git_enabled {
         git_commit_with_msg(
             &manager.store_dir,
-            format!("Renamed {} to {}", command.old_name, command.new_name).to_string(),
+            format!("Renamed {} to {}", command.old_name, command.new_name),
         )?;
     }
 
@@ -246,7 +243,7 @@ fn copy_password(manager: &mut RpassManager, command: CopyCommand) -> io::Result
     if manager.git_enabled {
         git_commit_with_msg(
             &manager.store_dir,
-            format!("Copied {} to {}", command.old_name, command.new_name).to_string(),
+            format!("Copied {} to {}", command.old_name, command.new_name),
         )?;
     }
 
@@ -299,7 +296,7 @@ fn remove_password(manager: &mut RpassManager, command: RemoveCommand) -> io::Re
     if manager.git_enabled {
         git_commit_with_msg(
             &manager.store_dir,
-            format!("Removed {}", command.pass_name).to_string(),
+            format!("Removed {}", command.pass_name),
         )?;
     }
 
@@ -342,7 +339,7 @@ fn ls(manager: &RpassManager) -> io::Result<()> {
     Ok(())
 }
 
-fn init_new(gpg_id: &str, store_dir: &PathBuf) -> io::Result<()> {
+fn init_new(gpg_id: &str, store_dir: &Path) -> io::Result<()> {
     let user_key: Key = match rpass::get_user_key(gpg_id)? {
         Some(key) => key,
         None => {
@@ -353,7 +350,7 @@ fn init_new(gpg_id: &str, store_dir: &PathBuf) -> io::Result<()> {
 
     assert!(user_key.is_qualified());
 
-    let mut path = store_dir.clone();
+    let mut path: PathBuf = store_dir.to_path_buf();
     create_dir_all(&path)?;
     path.push(".gpg-id");
     let mut file = File::create(&path)?;
@@ -382,7 +379,7 @@ fn insert(manager: &mut RpassManager, pass_name: String, force: bool) -> io::Res
     if manager.git_enabled {
         git_commit_with_msg(
             &manager.store_dir,
-            format!("Added {}", pass_name).to_string(),
+            format!("Added {}", pass_name),
         )?;
     }
 
@@ -436,12 +433,12 @@ fn into_clipboard(output: String) -> io::Result<()> {
         .spawn()?;
     let xclip_stdin = xclip.stdin.as_mut().unwrap();
     xclip_stdin.write_all(output.as_bytes())?;
-    drop(xclip_stdin);
+    //drop(xclip_stdin);
     xclip.wait()?;
     Ok(())
 }
 
-fn git_commit_with_msg(dir: &PathBuf, msg: String) -> io::Result<()> {
+fn git_commit_with_msg(dir: &Path, msg: String) -> io::Result<()> {
     git_run(dir, vec!["add".to_string(), "*".to_string()])?;
     git_run(dir, vec!["commit".to_string(), "-m".to_string(), msg])?;
     Ok(())
@@ -462,7 +459,7 @@ fn edit(manager: &mut RpassManager, pass_name: String) -> io::Result<()> {
 
         git_commit_with_msg(
             &manager.store_dir,
-            format!("Edited {}", pass_name).to_string(),
+            format!("Edited {}", pass_name),
         )?;
         return Ok(());
     }
@@ -472,7 +469,7 @@ fn edit(manager: &mut RpassManager, pass_name: String) -> io::Result<()> {
 
     git_commit_with_msg(
         &manager.store_dir,
-        format!("Added {}", pass_name).to_string(),
+        format!("Added {}", pass_name),
     )?;
     Ok(())
 }
@@ -503,7 +500,7 @@ fn generate(manager: &mut RpassManager, command: GenerateCommand) -> io::Result<
     manager.save_password(command.pass_name, password.clone())?;
 
     if command.clip {
-        into_clipboard(password.clone())?;
+        into_clipboard(password)?;
         println!(
             "Copied {} to clipboard. Will clear in 45 seconds.",
             pass_name
@@ -530,10 +527,7 @@ fn prompt_user(message: &str) -> bool {
     println!("{} [y/n] ", message);
     let mut answer: [u8; 1] = [0];
     std::io::stdin().read_exact(&mut answer).unwrap();
-    let res = match answer[0] as char {
-        'y' => true,
-        _ => false,
-    };
+    let res = matches!(answer[0] as char, 'y');
     // For some reason, after reading in with read_exact, rust just ignores the
     // next call to read_line. So here I just use one so it does not disrupt the
     // rest of the program. This seems like a bug...
