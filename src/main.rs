@@ -3,7 +3,8 @@ use fork::{daemon, Fork};
 use gpgme::Key;
 use passwords::PasswordGenerator;
 use regex::RegexSet;
-use rpass::RpassManager;
+use rpass::{RpassManager, RpassManagerError};
+use thiserror::Error;
 
 use std::{
     env,
@@ -29,6 +30,16 @@ const RPASS_DEFAULT_STORE_NAME: &str = ".rpassword_store";
 struct RpassArgs {
     #[clap(subcommand)]
     command: RpassCommand,
+}
+
+#[derive(Debug, Error)]
+enum RpassError {
+    #[error("An error occurred interacting with the Manager: {0}")]
+    RpassManager(#[from] rpass::RpassManagerError),
+    #[error("File System Error: {0}")]
+    FileSystem(#[from] io::Error),
+    #[error("Error Spawning external Command: {0}")]
+    Process(io::Error),
 }
 
 #[derive(Debug, Subcommand)]
@@ -171,15 +182,19 @@ fn main() {
     // When calling init for the first time, we short circuit here before createing the pw-manager.
     if !store_dir.exists() {
         if let RpassCommand::Init(InitCommand { gpg_id, .. }) = args.command {
-            init_new(&gpg_id, &store_dir);
+            match init_new(&gpg_id, &store_dir) {
+                Ok(_) => println!("Initialized new password store at {}", store_dir.display()),
+                Err(e) => println!("Failed to initialize new password store: {}", e),
+            }
             return;
         }
     }
 
-    let mut manager = rpass::RpassManager::new(store_dir.clone());
+    let mut manager =
+        rpass::RpassManager::new(store_dir.clone()).expect("Failed to create manager");
 
     // Sub Command dispatch.
-    match args.command {
+    let result = match args.command {
         RpassCommand::Init(InitCommand { gpg_id, .. }) => init_reencrypt(&mut manager, &gpg_id),
         RpassCommand::Ls(_) => ls(&manager),
         RpassCommand::Find(command) => find(&manager, command.pass_names),
@@ -193,17 +208,23 @@ fn main() {
         RpassCommand::Git(command) => git_run(&store_dir, command.git_command_args),
     };
 
+    match result {
+        Ok(_) => (),
+        Err(e) => println!("Error: {}", e),
+    }
 }
 
-fn git_run(store_dir: &Path, git_command_args: Vec<String>) {
+fn git_run(store_dir: &Path, git_command_args: Vec<String>) -> Result<(), RpassError> {
     let _output = Command::new("git")
         .arg("-C")
         .arg(store_dir.to_str().unwrap())
         .args(git_command_args)
-        .spawn();
+        .spawn()
+        .map_err(RpassError::Process)?;
+    Ok(())
 }
 
-fn move_password(manager: &mut RpassManager, command: MoveCommand) {
+fn move_password(manager: &mut RpassManager, command: MoveCommand) -> Result<(), RpassError> {
     let src_file = manager.pass_to_file(command.old_name.clone());
     let target_file = manager.pass_to_file(command.new_name.clone());
 
@@ -212,7 +233,7 @@ fn move_password(manager: &mut RpassManager, command: MoveCommand) {
         .arg(target_file)
         .arg("-v")
         .output()
-        .expect("Failed to mv the File.");
+        .map_err(RpassError::Process)?;
 
     let result = std::str::from_utf8(&output.stdout);
     println!("{}", result.unwrap().trim());
@@ -221,12 +242,12 @@ fn move_password(manager: &mut RpassManager, command: MoveCommand) {
         git_commit_with_msg(
             &manager.store_dir,
             format!("Renamed {} to {}", command.old_name, command.new_name),
-        );
+        )?;
     }
-
+    Ok(())
 }
 
-fn copy_password(manager: &mut RpassManager, command: CopyCommand) {
+fn copy_password(manager: &mut RpassManager, command: CopyCommand) -> Result<(), RpassError> {
     let src_file = manager.pass_to_file(command.old_name.clone());
     let target_file = manager.pass_to_file(command.new_name.clone());
 
@@ -235,20 +256,21 @@ fn copy_password(manager: &mut RpassManager, command: CopyCommand) {
         .arg(target_file)
         .arg("-v")
         .output()
-        .expect("Failed to edit file in vim.");
+        .map_err(RpassError::Process)?;
 
     if manager.git_enabled {
         git_commit_with_msg(
             &manager.store_dir,
             format!("Copied {} to {}", command.old_name, command.new_name),
-        );
+        )?;
     }
 
     let result = std::str::from_utf8(&output.stdout);
     println!("{}", result.unwrap().trim());
+    Ok(())
 }
 
-fn remove_password(manager: &mut RpassManager, command: RemoveCommand) {
+fn remove_password(manager: &mut RpassManager, command: RemoveCommand) -> Result<(), RpassError> {
     let file = manager.pass_to_file(command.pass_name.clone());
 
     let prompt = format!(
@@ -258,7 +280,7 @@ fn remove_password(manager: &mut RpassManager, command: RemoveCommand) {
 
     if !manager.pass_exists(command.pass_name.clone()) {
         eprintln!("Password {} does not exist.", command.pass_name);
-        return;
+        return Ok(());
     }
 
     if !command.force {
@@ -266,7 +288,7 @@ fn remove_password(manager: &mut RpassManager, command: RemoveCommand) {
             println!("Deleting");
         } else {
             println!("Abort");
-            return;
+            return Ok(());
         }
     }
 
@@ -288,69 +310,79 @@ fn remove_password(manager: &mut RpassManager, command: RemoveCommand) {
     println!("{}", result.unwrap().trim());
 
     if manager.git_enabled {
-        git_commit_with_msg(&manager.store_dir, format!("Removed {}", command.pass_name));
+        git_commit_with_msg(&manager.store_dir, format!("Removed {}", command.pass_name))?;
     }
-
+    Ok(())
 }
 
-fn ls(manager: &RpassManager) {
-    let pw_names = manager.get_password_names();
+fn ls(manager: &RpassManager) -> Result<(), RpassError> {
+    let pw_names = manager.get_password_names().map_err(RpassError::RpassManager)?;
     println!("Password store:");
     for pw in pw_names {
         println!("|- {}", pw);
     }
+    Ok(())
 }
 
-fn init_new(gpg_id: &str, store_dir: &Path) {
-    let _user_key: Key = match rpass::get_user_key(gpg_id) {
+fn init_new(gpg_id: &str, store_dir: &Path) -> Result<(), RpassError> {
+    let _user_key: Key = match rpass::get_user_key(gpg_id).map_err(RpassError::RpassManager)? {
         Some(key) => key,
         None => {
-            println!("Key for {} not found! Consider generating one.", gpg_id);
-            return;
+            return Err(RpassError::RpassManager(
+                RpassManagerError::KeyNotFound(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "Key not found",
+                )),
+            ));
         }
     };
-
     let mut path: PathBuf = store_dir.to_path_buf();
-    create_dir_all(&path).expect("Failed to create store directory.");
+    create_dir_all(&path).map_err(RpassError::FileSystem)?;
     path.push(".gpg-id");
-    let mut file = File::create(&path).expect("Failed to create .gpg-id file.");
-    file.write_all(gpg_id.as_bytes()).expect("Failed to write to .gpg-id file.");
+    let mut file = File::create(&path).map_err(RpassError::FileSystem)?;
+    file.write_all(gpg_id.as_bytes())
+        .map_err(RpassError::FileSystem)?;
+    Ok(())
 }
 
-fn init_reencrypt(manager: &mut RpassManager, gpg_id: &str) {
-    let mut new_manager = manager.change_key(gpg_id);
-    let passwords = manager.get_password_names();
+fn init_reencrypt(manager: &mut RpassManager, gpg_id: &str) -> Result<(), RpassError> {
+    let mut new_manager = manager.change_key(gpg_id)?;
+    let passwords = manager.get_password_names()?;
     for pass_name in passwords {
-        let password = manager.get_password(pass_name.clone());
-        new_manager.save_password(pass_name, password);
+        let password = manager.get_password(pass_name.clone())?;
+        new_manager
+            .save_password(pass_name, password)
+            .map_err(RpassError::RpassManager)?;
     }
+    Ok(())
 }
 
-fn insert(manager: &mut RpassManager, pass_name: String, force: bool) {
+fn insert(manager: &mut RpassManager, pass_name: String, force: bool) -> Result<(), RpassError> {
     if manager.pass_exists(pass_name.clone()) && !force {
         if prompt_user("Password already exists. Override?") {
             println!("Overriding.");
         } else {
             println!("Abort.");
-            return;
+            return Ok(());
         }
     }
 
     let password = get_pass_from_user().expect("Failed to get password from user.");
-    manager.save_password(pass_name.clone(), password);
+    manager.save_password(pass_name.clone(), password)?;
 
     if manager.git_enabled {
-        git_commit_with_msg(&manager.store_dir, format!("Added {}", pass_name));
+        git_commit_with_msg(&manager.store_dir, format!("Added {}", pass_name))?;
     }
+    Ok(())
 }
 
-fn find(manager: &RpassManager, search_terms: Vec<String>) {
+fn find(manager: &RpassManager, search_terms: Vec<String>) -> Result<(), RpassError> {
     let regexes: Vec<_> = search_terms
         .iter()
         .map(|pass_name| format!(r".*{}.*", pass_name))
         .collect();
     let regex_set = RegexSet::new(regexes).unwrap();
-    let password_names = manager.get_password_names();
+    let password_names = manager.get_password_names()?;
 
     println!("Search Terms: {}", search_terms.join(","));
     for pw in password_names {
@@ -358,47 +390,54 @@ fn find(manager: &RpassManager, search_terms: Vec<String>) {
             println!("|-- {}", pw);
         }
     }
+    Ok(())
 }
 
-fn show(manager: &mut RpassManager, pass_name: String, clip: bool) {
-    let password = manager.get_password(pass_name.clone());
+fn show(manager: &mut RpassManager, pass_name: String, clip: bool) -> Result<(), RpassError> {
+    let password = manager.get_password(pass_name.clone())?;
 
     if clip {
-        into_clipboard(password);
+        into_clipboard(password)?;
         println!(
             "Copied {} to clipboard. Will clear in 45 seconds.",
             pass_name
         );
         if let Ok(Fork::Child) = daemon(false, false) {
             sleep(Duration::from_millis(45000));
-            into_clipboard("".to_string());
+            into_clipboard("".to_string())?;
             println!("Clipboard cleared.");
         }
     } else {
         println!("{}", password);
     }
+    Ok(())
 }
 
-fn into_clipboard(output: String) {
+fn into_clipboard(output: String) -> Result<(), RpassError> {
     let mut xclip = Command::new("xclip")
         .arg("-selection")
         .arg("clipboard")
         .arg("-i")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .spawn().expect("Failed to spawn xclip.");
+        .spawn()
+        .map_err(RpassError::Process)?;
     let xclip_stdin = xclip.stdin.as_mut().unwrap();
-    xclip_stdin.write_all(output.as_bytes()).expect("Failed to write to xclip stdin.");
+    xclip_stdin
+        .write_all(output.as_bytes())
+        .map_err(RpassError::Process)?;
     //drop(xclip_stdin);
-    xclip.wait().expect("Failed to wait for xclip.");
+    xclip.wait().map_err(RpassError::Process)?;
+    Ok(())
 }
 
-fn git_commit_with_msg(dir: &Path, msg: String) {
-    git_run(dir, vec!["add".to_string(), "*".to_string()]);
-    git_run(dir, vec!["commit".to_string(), "-m".to_string(), msg]);
+fn git_commit_with_msg(dir: &Path, msg: String) -> Result<(), RpassError> {
+    git_run(dir, vec!["add".to_string(), "*".to_string()])?;
+    git_run(dir, vec!["commit".to_string(), "-m".to_string(), msg])?;
+    Ok(())
 }
 
-fn edit(manager: &mut RpassManager, pass_name: String) {
+fn edit(manager: &mut RpassManager, pass_name: String) -> Result<(), RpassError> {
     let tmp_file: String = format!(
         "{}{}pwtempfile",
         manager.store_dir.to_str().unwrap(),
@@ -406,9 +445,10 @@ fn edit(manager: &mut RpassManager, pass_name: String) {
     );
 
     if manager.pass_exists(pass_name.clone()) {
-        let old_password = manager.get_password(pass_name.clone());
-        let mut file = File::open(tmp_file.clone()).expect("Failed to open temporary file.");
-        file.write_all(old_password.as_bytes()).expect("Failed to write to temporary file.");
+        let old_password = manager.get_password(pass_name.clone())?;
+        let mut file = File::open(tmp_file.clone()).map_err(RpassError::FileSystem)?;
+        file.write_all(old_password.as_bytes())
+            .map_err(RpassError::FileSystem)?;
     } else {
         println!("Hello");
     }
@@ -416,20 +456,22 @@ fn edit(manager: &mut RpassManager, pass_name: String) {
     Command::new("vim")
         .arg(tmp_file.clone())
         .status()
-        .expect("Failed to edit file in vim.");
+        .map_err(RpassError::Process)?;
     let mut file = File::open(tmp_file.clone()).expect("Failed to open temporary file.");
     let mut new_password = String::new();
-    file.read_to_string(&mut new_password).expect("Failed to read temporary file.");
+    file.read_to_string(&mut new_password)
+        .expect("Failed to read temporary file.");
     fs::remove_file(tmp_file).expect("Failed to remove temporary file.");
 
-    manager.save_password(pass_name.clone(), new_password);
+    manager.save_password(pass_name.clone(), new_password)?;
 
     if manager.git_enabled {
-        git_commit_with_msg(&manager.store_dir, format!("Edited {}", pass_name));
+        git_commit_with_msg(&manager.store_dir, format!("Edited {}", pass_name))?;
     }
+    Ok(())
 }
 
-fn generate(manager: &mut RpassManager, command: GenerateCommand) {
+fn generate(manager: &mut RpassManager, command: GenerateCommand) -> Result<(), RpassError> {
     let pg = PasswordGenerator {
         length: command.pass_length.unwrap_or(25),
         numbers: true,
@@ -447,27 +489,28 @@ fn generate(manager: &mut RpassManager, command: GenerateCommand) {
             println!("Overriding.");
         } else {
             println!("Abort.");
-            return;
+            return Ok(());
         }
     }
 
     let password = pg.generate_one().unwrap();
-    manager.save_password(command.pass_name, password.clone());
+    manager.save_password(command.pass_name, password.clone())?;
 
     if command.clip {
-        into_clipboard(password);
+        into_clipboard(password)?;
         println!(
             "Copied {} to clipboard. Will clear in 45 seconds.",
             pass_name
         );
         if let Ok(Fork::Child) = daemon(false, false) {
             sleep(Duration::from_millis(45000));
-            into_clipboard("".to_string());
+            into_clipboard("".to_string())?;
             println!("Clipboard cleared.");
         }
     } else {
         println!("{}", password);
     }
+    Ok(())
 }
 
 fn get_pass_from_user() -> io::Result<String> {
