@@ -24,7 +24,7 @@ use std::path::PathBuf;
 
 mod rpass;
 
-const RPASS_DEFAULT_STORE_NAME: &str = ".rpassword_store";
+const RPASS_DEFAULT_STORE_NAME: &str = ".password_store";
 
 #[derive(Debug, Parser)]
 #[clap(author, version, about)]
@@ -191,8 +191,13 @@ fn main() {
         }
     }
 
-    let mut manager =
-        rpass::RpassManager::new(store_dir.clone()).expect("Failed to create manager");
+    let mut manager = match rpass::RpassManager::new(store_dir.clone()) {
+        Ok(m) => m,
+        Err(e) => {
+            println!("Failed to initialize password store: {}", e);
+            return;
+        }
+    };
 
     // Sub Command dispatch.
     let result = match args.command {
@@ -216,12 +221,13 @@ fn main() {
 }
 
 fn git_run(store_dir: &Path, git_command_args: Vec<String>) -> Result<(), RpassError> {
-    let _output = Command::new("git")
+    let mut cmd = Command::new("git")
         .arg("-C")
         .arg(store_dir.to_str().unwrap())
         .args(git_command_args)
         .spawn()
         .map_err(RpassError::Process)?;
+    cmd.wait().map_err(RpassError::Process)?;
     Ok(())
 }
 
