@@ -444,16 +444,21 @@ fn edit(manager: &mut RpassManager, pass_name: String) -> Result<(), RpassError>
         pass_name
     );
 
-    if manager.pass_exists(pass_name.clone()) {
-        let old_password = manager.get_password(pass_name.clone())?;
-        let mut file = File::create(tmp_file.clone()).map_err(RpassError::FileSystem)?;
-        file.write_all(old_password.as_bytes())
-            .map_err(RpassError::FileSystem)?;
-    } else {
-        println!("Hello");
+    if !manager.pass_exists(pass_name.clone()) {
+        return insert(manager, pass_name.clone(), false);
     }
 
-    Command::new("vim")
+    let old_password = manager.get_password(pass_name.clone())?;
+    let mut file = File::create(tmp_file.clone()).map_err(RpassError::FileSystem)?;
+    file.write_all(old_password.as_bytes())
+        .map_err(RpassError::FileSystem)?;
+
+    let editor = match env::var("EDITOR") {
+        Ok(val) => val,
+        Err(_) => "vim".to_string(),
+    };
+
+    Command::new(editor)
         .arg(tmp_file.clone())
         .status()
         .map_err(RpassError::Process)?;
@@ -463,11 +468,15 @@ fn edit(manager: &mut RpassManager, pass_name: String) -> Result<(), RpassError>
         .expect("Failed to read temporary file.");
     fs::remove_file(tmp_file).map_err(RpassError::FileSystem)?;
 
-    manager.save_password(pass_name.clone(), new_password)?;
+    if new_password != old_password {
+        manager.save_password(pass_name.clone(), new_password)?;
 
-    if manager.git_enabled {
-        git_commit_with_msg(&manager.store_dir, format!("Edited {}", pass_name))?;
+        if manager.git_enabled {
+            git_commit_with_msg(&manager.store_dir, format!("Edited {}", pass_name))?;
+        }
     }
+
+
     Ok(())
 }
 
