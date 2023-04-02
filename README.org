@@ -1,7 +1,5 @@
 #+author: Jan Roßbach
-#+title: rpass
-
-* Rpass
+#+title: Rpass
 
 This is a fairly simple gnu pass clone, written in rust.
 
@@ -23,6 +21,19 @@ On arch you can just use the names to install via pacman.
 
 As my first rust project, this is mostly in order to teach me the basics of rust.
 I also wanted to extend the
+
+* Installation
+
+I have not bothered to put it on crates.io yet.
+Just run
+
+#+begin_src sh
+  make install
+#+end_src
+
+to build the binary in release mode and copy it to the target location.
+By default this will install the binary into */usr/local/bin*.
+You can change this in the Makefile if you want to.
 
 * Usage
 
