@@ -1,4 +1,5 @@
 use clap::{Args, Parser, Subcommand};
+use colored::Colorize;
 use fork::{daemon, Fork};
 use gpgme::Key;
 use passwords::PasswordGenerator;
@@ -316,11 +317,28 @@ fn remove_password(manager: &mut RpassManager, command: RemoveCommand) -> Result
 }
 
 fn ls(manager: &RpassManager) -> Result<(), RpassError> {
-    let pw_names = manager.get_password_names().map_err(RpassError::RpassManager)?;
-    println!("Password store:");
-    for pw in pw_names {
-        println!("|- {}", pw);
-    }
+    println!("{}", "Password Store".blue().bold());
+    let tree = Command::new("tree")
+        .arg("-C")
+        .arg("-l")
+        .arg("--noreport")
+        .arg(manager.store_dir.to_str().unwrap())
+        .stdout(Stdio::piped())
+        .spawn()
+        .map_err(RpassError::Process)?;
+    let tail = Command::new("tail")
+        .arg("-n")
+        .arg("+2")
+        .stdin(tree.stdout.unwrap())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("Failed to execute tail");
+    Command::new("sed")
+        .arg("-E")
+        .arg(r"s/\.gpg(\x1B\[[0-9]+m)?( ->|$)/\1\2/g")
+        .stdin(tail.stdout.unwrap())
+        .spawn()
+        .map_err(RpassError::Process)?;
     Ok(())
 }
 
@@ -328,12 +346,9 @@ fn init_new(gpg_id: &str, store_dir: &Path) -> Result<(), RpassError> {
     let _user_key: Key = match rpass::get_user_key(gpg_id).map_err(RpassError::RpassManager)? {
         Some(key) => key,
         None => {
-            return Err(RpassError::RpassManager(
-                RpassManagerError::KeyNotFound(io::Error::new(
-                    io::ErrorKind::NotFound,
-                    "Key not found",
-                )),
-            ));
+            return Err(RpassError::RpassManager(RpassManagerError::KeyNotFound(
+                io::Error::new(io::ErrorKind::NotFound, "Key not found"),
+            )));
         }
     };
     let mut path: PathBuf = store_dir.to_path_buf();
@@ -426,7 +441,6 @@ fn into_clipboard(output: String) -> Result<(), RpassError> {
     xclip_stdin
         .write_all(output.as_bytes())
         .map_err(RpassError::Process)?;
-    //drop(xclip_stdin);
     xclip.wait().map_err(RpassError::Process)?;
     Ok(())
 }
