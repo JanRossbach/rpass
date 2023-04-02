@@ -1,12 +1,30 @@
 #+author: Jan Roßbach
 #+title: rpass
 
-* rpass
+* Rpass
 
-This is a fairly simple linux pass clone written in rust.
+This is a fairly simple gnu pass clone, written in rust.
 
 * Dependencies
 
 - gpg
 - gpgme
 - libgpg-error
+
+* Motivation
+
+As my first rust project, this is mostly in order to teach me the basics of rust.
+I also wanted to extend the
+
+* Usage
+
+Exactly like you would expect from pass. All the commands should work as expected.
+
+The location of the password store can be controlled with the `RPASSWORD_STORE_DIR` environment variable.
+It defaults to `~/.password_store`.
+
+* Scripts
+
+In the scripts folder of this repository you can find a updated version of passmenu called rpassmenu.
+For those unfamiliar with passmenu, it is a dmenu script that lets you choose one of the passwords in the store
+and copy it to the clipboard.
