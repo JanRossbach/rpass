@@ -9,6 +9,7 @@ This is a fairly simple gnu pass clone, written in rust.
 
 The following external programs are required.
 
+- tree
 - gpg
 - gpgme
 - libgpg-error
@@ -28,7 +29,7 @@ I also wanted to extend the
 Exactly like you would expect from pass. All the commands should work as expected.
 
 The location of the password store can be controlled with the `RPASSWORD_STORE_DIR` environment variable.
-It defaults to `~/.password_store`.
+It defaults to `~/.password_store`. You can just re-use the your pass password store if you have one.
 
 * Scripts
 

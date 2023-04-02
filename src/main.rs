@@ -24,7 +24,7 @@ use std::path::PathBuf;
 
 mod rpass;
 
-const RPASS_DEFAULT_STORE_NAME: &str = ".password_store";
+const RPASS_DEFAULT_STORE_NAME: &str = ".password-store";
 
 #[derive(Debug, Parser)]
 #[clap(author, version, about)]
@@ -153,27 +153,6 @@ struct ShowCommand {
     clip: bool,
 }
 
-fn args_to_store_dir(args: &RpassArgs) -> PathBuf {
-    // The store_base_dir is either in determined by the env or the default dir.
-    let default_store_dir = home_dir().unwrap().as_path().join(RPASS_DEFAULT_STORE_NAME);
-    let mut rpassword_store_dir = match env::var("RPASSWORD_STORE_DIR") {
-        Ok(s) => PathBuf::from_str(&s).unwrap_or(default_store_dir),
-        Err(_err) => default_store_dir,
-    };
-
-    let subfolder = match args.command {
-        RpassCommand::Init(InitCommand {
-            subfolder: Some(ref s),
-            ..
-        }) => s.to_string(),
-        RpassCommand::Ls(LSCommand {
-            subfolder: Some(ref s),
-        }) => s.to_string(),
-        _ => "".to_string(),
-    };
-    rpassword_store_dir.push(subfolder);
-    rpassword_store_dir
-}
 
 fn main() {
     let args = RpassArgs::parse();
@@ -199,7 +178,7 @@ fn main() {
         }
     };
 
-    // Sub Command dispatch.
+    // Sub Command dispatch. Every subcommand is responsible for printing its own output.
     let result = match args.command {
         RpassCommand::Init(InitCommand { gpg_id, .. }) => init_reencrypt(&mut manager, &gpg_id),
         RpassCommand::Ls(_) => ls(&manager),
@@ -220,6 +199,7 @@ fn main() {
     }
 }
 
+// Run git command in the password store directory.
 fn git_run(store_dir: &Path, git_command_args: Vec<String>) -> Result<(), RpassError> {
     let mut cmd = Command::new("git")
         .arg("-C")
@@ -551,4 +531,26 @@ fn prompt_user(message: &str) -> bool {
     std::io::stdin().read_line(&mut input).unwrap();
 
     res
+}
+
+fn args_to_store_dir(args: &RpassArgs) -> PathBuf {
+    // The store_base_dir is either in determined by the env or the default dir.
+    let default_store_dir = home_dir().unwrap().as_path().join(RPASS_DEFAULT_STORE_NAME);
+    let mut rpassword_store_dir = match env::var("RPASSWORD_STORE_DIR") {
+        Ok(s) => PathBuf::from_str(&s).unwrap_or(default_store_dir),
+        Err(_err) => default_store_dir,
+    };
+
+    let subfolder = match args.command {
+        RpassCommand::Init(InitCommand {
+            subfolder: Some(ref s),
+            ..
+        }) => s.to_string(),
+        RpassCommand::Ls(LSCommand {
+            subfolder: Some(ref s),
+        }) => s.to_string(),
+        _ => "".to_string(),
+    };
+    rpassword_store_dir.push(subfolder);
+    rpassword_store_dir
 }

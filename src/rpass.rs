@@ -169,3 +169,52 @@ pub fn read_gpg_id(store_dir: &Path) -> Result<String, RpassManagerError> {
         .expect("Could not read gpg-id file");
     Ok(gpg_id.trim().to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_read_gpg_id() {
+        let gpg_id = read_gpg_id(Path::new("test_store")).unwrap();
+        assert_eq!(gpg_id, "janrossbach3@gmail.com");
+    }
+
+    #[test]
+    fn test_get_user_key() {
+        let gpg_id = read_gpg_id(Path::new("test_store")).unwrap();
+        let key = get_user_key(&gpg_id).unwrap();
+        assert!(key.is_some());
+    }
+
+    #[test]
+    fn test_is_git_dir() {
+        let git_enabled = is_git_dir(Path::new("test_store"));
+        assert_eq!(git_enabled, true);
+    }
+
+    #[test]
+    fn test_rpass_manager_save() {
+        let mut manager = RpassManager::new("test_store".into()).unwrap();
+        manager.save_password("test".into(), "test".into()).unwrap();
+        assert!(manager.pass_exists("test".into()));
+    }
+
+    #[test]
+    fn test_rpass_manager_get_password() {
+        let mut manager = RpassManager::new("test_store".into()).unwrap();
+        manager.save_password("test".into(), "test".into()).unwrap();
+        let password = manager.get_password("test".into()).unwrap();
+        assert_eq!(password, "test");
+    }
+
+    #[test]
+    fn test_rpass_manager_get_password_names() {
+        let mut manager = RpassManager::new("test_store".into()).unwrap();
+        manager.save_password("test".into(), "test".into()).unwrap();
+        let password_names = manager.get_password_names().unwrap();
+        assert_eq!(password_names.len(), 1);
+        assert!(password_names.contains("test"));
+    }
+
+}
