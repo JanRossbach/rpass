@@ -7,9 +7,16 @@ This is a fairly simple gnu pass clone, written in rust.
 
 * Dependencies
 
+The following external programs are required.
+
 - gpg
 - gpgme
 - libgpg-error
+
+The dependencies come from the use of the [[https://github.com/gpg-rs/gpgm][gpgme]] and
+[[https://github.com/gpg-rs/libgpg-error][libgpg-error]] crates. You can refer to them for hints on how to install these.
+
+On arch you can just use the names to install via pacman.
 
 * Motivation
 

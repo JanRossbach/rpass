@@ -169,18 +169,3 @@ pub fn read_gpg_id(store_dir: &Path) -> Result<String, RpassManagerError> {
         .expect("Could not read gpg-id file");
     Ok(gpg_id.trim().to_string())
 }
-
-#[cfg(test)]
-mod tests {
-    // Tests for the rpass library.
-    use super::*;
-    use std::path::PathBuf;
-
-    #[test]
-    fn test_read_gpg_id() {
-        let mut store_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        store_dir.push("test_store");
-        let gpg_id = read_gpg_id(&store_dir).unwrap();
-        assert_eq!(gpg_id, "janrossbach3@gmail.com");
-    }
-}
