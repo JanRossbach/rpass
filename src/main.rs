@@ -466,7 +466,7 @@ fn edit(manager: &mut RpassManager, pass_name: String) -> Result<(), RpassError>
 
     if manager.pass_exists(pass_name.clone()) {
         let old_password = manager.get_password(pass_name.clone())?;
-        let mut file = File::open(tmp_file.clone()).map_err(RpassError::FileSystem)?;
+        let mut file = File::create(tmp_file.clone()).map_err(RpassError::FileSystem)?;
         file.write_all(old_password.as_bytes())
             .map_err(RpassError::FileSystem)?;
     } else {
@@ -477,11 +477,11 @@ fn edit(manager: &mut RpassManager, pass_name: String) -> Result<(), RpassError>
         .arg(tmp_file.clone())
         .status()
         .map_err(RpassError::Process)?;
-    let mut file = File::open(tmp_file.clone()).expect("Failed to open temporary file.");
+    let mut file = File::open(tmp_file.clone()).map_err(RpassError::FileSystem)?;
     let mut new_password = String::new();
     file.read_to_string(&mut new_password)
         .expect("Failed to read temporary file.");
-    fs::remove_file(tmp_file).expect("Failed to remove temporary file.");
+    fs::remove_file(tmp_file).map_err(RpassError::FileSystem)?;
 
     manager.save_password(pass_name.clone(), new_password)?;
 
